@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bias–Variance Tradeoff Explorer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  :root {
+    --bg: #000;
+    --bg2: #111;
+    --bg3: #1a1a1a;
+    --fg: #fff;
+    --muted: #aaa;
+    --border: #333;
+    --blue: #378ADD;
+    --red: #D85A30;
+    --green: #39FF14;
+    --purple: #a855f7;
+    --gold: #facc15;
+    --gray: #888780;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Courier New', monospace;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  .app-header { margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .app-title { font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
+  .app-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Controls */
+  .controls-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .controls-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 30px;
+  }
+  .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+  .ctrl-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .ctrl-row { display: flex; align-items: center; gap: 10px; }
+  .ctrl-val {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--fg);
+    min-width: 40px;
+    text-align: right;
+  }
+  input[type=range] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--blue);
+    cursor: pointer;
+  }
+  select {
+    background: var(--bg3);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+    width: 100%;
+  }
+  .section-divider {
+    font-size: 11px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    margin-top: 4px;
+    margin-bottom: 2px;
+    grid-column: 1 / -1;
+    letter-spacing: 0.06em;
+  }
+
+  /* Diagnosis banner */
+  .diagnosis {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 10px;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    letter-spacing: 0.03em;
+  }
+
+  /* Chart panels */
+  .panels-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .panels-grid-bottom {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+  }
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 10px;
+  }
+  .chart-container { position: relative; width: 100%; height: 220px; }
+
+  /* Scatter canvas for model fit */
+  #fitCanvas { width: 100%; height: 220px; display: block; }
+
+  /* Legend */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 8px; font-size: 10px; color: var(--muted);
+  }
+  .leg { display: flex; align-items: center; gap: 4px; }
+  .leg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .leg-line { width: 16px; height: 2px; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="app-title">Bias–Variance Tradeoff Explorer</div>
+  <div class="app-sub">Drag sliders · Switch regularization · Tune CV folds · All charts update live</div>
+</div>
+
+<!-- CONTROLS -->
+<div class="controls-wrap">
+  <div class="controls-grid">
+    <div class="ctrl-group">
+      <div class="ctrl-label">Model complexity (degree)</div>
+      <div class="ctrl-row">
+        <input type="range" id="sDegree" min="1" max="12" value="3" step="1">
+        <span class="ctrl-val" id="vDegree">3</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">Noise level</div>
+      <div class="ctrl-row">
+        <input type="range" id="sNoise" min="5" max="100" value="30" step="5">
+        <span class="ctrl-val" id="vNoise">0.30</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">Training samples</div>
+      <div class="ctrl-row">
+        <input type="range" id="sSamples" min="10" max="150" value="30" step="5">
+        <span class="ctrl-val" id="vSamples">30</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">CV folds (k)</div>
+      <div class="ctrl-row">
+        <input type="range" id="sFolds" min="3" max="10" value="5" step="1">
+        <span class="ctrl-val" id="vFolds">5</span>
+      </div>
+    </div>
+
+    <div class="section-divider">── Regularization ──────────────────────────</div>
+
+    <div class="ctrl-group">
+      <div class="ctrl-label">Regularization type</div>
+      <select id="sRegType">
+        <option value="ols">None (OLS)</option>
+        <option value="ridge">Ridge (L2)</option>
+        <option value="lasso">Lasso (L1)</option>
+        <option value="elastic">Elastic Net</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">Regularization strength (α)</div>
+      <div class="ctrl-row">
+        <input type="range" id="sAlpha" min="1" max="200" value="10" step="1">
+        <span class="ctrl-val" id="vAlpha">1.0</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">L1 ratio (Elastic Net only)</div>
+      <div class="ctrl-row">
+        <input type="range" id="sL1" min="0" max="100" value="50" step="5">
+        <span class="ctrl-val" id="vL1">0.50</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DIAGNOSIS -->
+<div class="diagnosis" id="diagBanner">—</div>
+
+<!-- TOP ROW PANELS -->
+<div class="panels-grid">
+  <div class="panel">
+    <div class="panel-title">Model fit</div>
+    <canvas id="fitCanvas" style="height:220px;"></canvas>
+    <div class="legend">
+      <span class="leg"><span class="leg-dot" style="background:#378ADD"></span>Train</span>
+      <span class="leg"><span class="leg-dot" style="background:#D85A30; border-radius:0; transform:rotate(45deg);"></span>Test</span>
+      <span class="leg"><span class="leg-line" style="background:#39FF14"></span>True fn</span>
+      <span class="leg"><span class="leg-line" style="background:#534AB7"></span>Model fit</span>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Error comparison</div>
+    <div class="chart-container"><canvas id="cError" role="img" aria-label="Bar chart comparing Train MSE, Test MSE, and CV Mean MSE with a noise floor line"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Error decomposition</div>
+    <div class="chart-container"><canvas id="cPie" role="img" aria-label="Pie chart showing breakdown of error into Bias squared, Variance, and Noise"></canvas></div>
+  </div>
+</div>
+
+<!-- BOTTOM ROW PANELS -->
+<div class="panels-grid-bottom">
+  <div class="panel">
+    <div class="panel-title" id="cvFoldTitle">5-Fold CV scores</div>
+    <div class="chart-container"><canvas id="cFolds" role="img" aria-label="Bar chart of individual cross validation fold MSE scores"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Full error summary</div>
+    <div class="chart-container"><canvas id="cSummary" role="img" aria-label="Bar chart showing Train MSE, Test MSE, CV Mean MSE, and CV Std"></canvas></div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">Error vs complexity (all degrees)</div>
+    <div class="chart-container"><canvas id="cComplexity" role="img" aria-label="Line chart of Train MSE, Test MSE, and CV Mean MSE across polynomial degrees 1 to 12"></canvas></div>
+  </div>
+</div>
+
+<script>
+// ── Seeded RNG ───────────────────────────────────────────────────
+class RNG {
+  constructor(seed) { this.s = seed; }
+  next() {
+    this.s = (this.s * 1664525 + 1013904223) & 0xffffffff;
+    return (this.s >>> 0) / 0xffffffff;
+  }
+  randn() {
+    let u = 0, v = 0;
+    while(u === 0) u = this.next();
+    while(v === 0) v = this.next();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  }
+}
+
+// ── Math helpers ─────────────────────────────────────────────────
+function trueFunc(x) { return Math.sin(2 * Math.PI * x); }
+
+function linspace(a, b, n) {
+  const arr = [];
+  for (let i = 0; i < n; i++) arr.push(a + (b-a)*i/(n-1));
+  return arr;
+}
+
+function polyFeatures(x, degree) {
+  const f = [1];
+  for (let d = 1; d <= degree; d++) f.push(Math.pow(x, d));
+  return f;
+}
+
+function matMul(A, B) {
+  const r = A.length, c = B[0].length, k = B.length;
+  const C = Array.from({length:r}, () => new Array(c).fill(0));
+  for (let i=0;i<r;i++) for (let j=0;j<c;j++) for (let l=0;l<k;l++)
+    C[i][j] += A[i][l]*B[l][j];
+  return C;
+}
+function transpose(A) {
+  return A[0].map((_,j) => A.map(r => r[j]));
+}
+function matAdd(A, B) {
+  return A.map((r,i) => r.map((v,j) => v + B[i][j]));
+}
+function scalarMul(s, A) {
+  return A.map(r => r.map(v => v*s));
+}
+
+// Ridge regression: (X'X + αI)^-1 X'y using Gaussian elimination
+function ridgeFit(Xmat, y, alpha) {
+  const n = Xmat.length, p = Xmat[0].length;
+  const Xt = transpose(Xmat);
+  let XtX = matMul(Xt, Xmat);
+  for (let i=0;i<p;i++) XtX[i][i] += alpha;
+  const Xty = matMul(Xt, y.map(v=>[v]));
+  // Gaussian elimination with partial pivoting
+  const A = XtX.map((r,i) => [...r, Xty[i][0]]);
+  for (let col=0;col<p;col++) {
+    let maxRow = col;
+    for (let row=col+1;row<p;row++)
+      if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) maxRow=row;
+    [A[col], A[maxRow]] = [A[maxRow], A[col]];
+    const piv = A[col][col];
+    if (Math.abs(piv) < 1e-12) continue;
+    for (let j=col;j<=p;j++) A[col][j] /= piv;
+    for (let row=0;row<p;row++) {
+      if (row===col) continue;
+      const f = A[row][col];
+      for (let j=col;j<=p;j++) A[row][j] -= f*A[col][j];
+    }
+  }
+  return A.map(r => r[p]);
+}
+
+function predict(coeffs, X_vals, degree) {
+  return X_vals.map(x => {
+    const f = polyFeatures(x, degree);
+    return coeffs.reduce((s,c,i) => s + c*f[i], 0);
+  });
+}
+
+function mse(y, yhat) {
+  return y.reduce((s,v,i) => s + (v-yhat[i])**2, 0) / y.length;
+}
+
+// ── Data generation ──────────────────────────────────────────────
+function generateData(n, noiseLevel, seed=42) {
+  const rng = new RNG(seed);
+  const X = Array.from({length:n}, () => rng.next()).sort((a,b)=>a-b);
+  const y = X.map(x => trueFunc(x) + rng.randn()*noiseLevel);
+  return {X, y};
+}
+
+function trainTestSplit(X, y, testRatio=0.3, seed=0) {
+  const rng = new RNG(seed*999+1);
+  const n = X.length;
+  const idx = Array.from({length:n},(_,i)=>i);
+  for (let i=n-1;i>0;i--) {
+    const j = Math.floor(rng.next()*(i+1));
+    [idx[i],idx[j]] = [idx[j],idx[i]];
+  }
+  const nTest = Math.floor(n*testRatio);
+  const testIdx  = new Set(idx.slice(0,nTest));
+  const Xtr=[],ytr=[],Xte=[],yte=[];
+  X.forEach((v,i) => {
+    if (testIdx.has(i)) { Xte.push(v); yte.push(y[i]); }
+    else                { Xtr.push(v); ytr.push(y[i]); }
+  });
+  return {Xtr,ytr,Xte,yte};
+}
+
+function getAlphaForReg(regType, alphaRaw, l1Ratio) {
+  if (regType==='ols')    return 0;
+  if (regType==='ridge')  return alphaRaw;
+  if (regType==='lasso')  return alphaRaw*0.01;
+  return alphaRaw*0.01; // elastic (approx ridge for simplicity)
+}
+
+function fitModel(Xtr, ytr, degree, regType, alphaVal) {
+  const Xmat = Xtr.map(x => polyFeatures(x, degree));
+  return ridgeFit(Xmat, ytr, regType==='ols' ? 0 : alphaVal);
+}
+
+function kFoldCV(X, y, degree, regType, alphaVal, k, seed=42) {
+  const n = X.length;
+  const rng = new RNG(seed);
+  const idx = Array.from({length:n},(_,i)=>i);
+  for (let i=n-1;i>0;i--) {
+    const j=Math.floor(rng.next()*(i+1));
+    [idx[i],idx[j]]=[idx[j],idx[i]];
+  }
+  const foldMSEs = [];
+  for (let f=0;f<k;f++) {
+    const valIdx = new Set(idx.filter((_,i) => i%k===f));
+    const Xtr=[],ytr=[],Xval=[],yval=[];
+    X.forEach((v,i) => {
+      if (valIdx.has(i)) { Xval.push(v); yval.push(y[i]); }
+      else               { Xtr.push(v);  ytr.push(y[i]); }
+    });
+    if (Xtr.length < degree+1) { foldMSEs.push(999); continue; }
+    const coeffs = fitModel(Xtr, ytr, degree, regType, alphaVal);
+    const yhat   = predict(coeffs, Xval, degree);
+    foldMSEs.push(mse(yval, yhat));
+  }
+  const mean = foldMSEs.reduce((a,b)=>a+b,0)/foldMSEs.length;
+  const std  = Math.sqrt(foldMSEs.reduce((s,v)=>s+(v-mean)**2,0)/foldMSEs.length);
+  return {foldMSEs, mean, std};
+}
+
+// ── Chart instances ──────────────────────────────────────────────
+const COLORS = {
+  blue:'#378ADD', red:'#D85A30', green:'#39FF14',
+  purple:'#a855f7', gold:'#facc15', gray:'#888780', violet:'#534AB7'
+};
+const CHART_OPTS = {
+  responsive:true, maintainAspectRatio:false, animation:{duration:250},
+  plugins:{legend:{display:false}},
+  scales:{
+    x:{grid:{color:'#1a1a1a'}, ticks:{color:'#888', font:{size:9}}},
+    y:{grid:{color:'#1a1a1a'}, ticks:{color:'#888', font:{size:9}}}
+  }
+};
+
+let charts = {};
+
+function mkChart(id, type, data, options) {
+  if (charts[id]) charts[id].destroy();
+  const ctx = document.getElementById(id).getContext('2d');
+  charts[id] = new Chart(ctx, {type, data, options});
+  return charts[id];
+}
+
+// ── Fit canvas (scatter + lines via 2D canvas) ───────────────────
+function drawFitCanvas(Xtr, ytr, Xte, yte, coeffs, degree) {
+  const canvas = document.getElementById('fitCanvas');
+  canvas.width  = canvas.offsetWidth  || 400;
+  canvas.height = canvas.offsetHeight || 220;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const PAD = {top:10, right:10, bottom:30, left:36};
+  const plotW = W-PAD.left-PAD.right, plotH = H-PAD.top-PAD.bottom;
+
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#111'; ctx.fillRect(0,0,W,H);
+
+  const allY = [...ytr,...yte];
+  const xMin=0, xMax=1;
+  const yMin = Math.min(-2, ...allY) - 0.1;
+  const yMax = Math.max( 2, ...allY) + 0.1;
+
+  function px(x) { return PAD.left + (x-xMin)/(xMax-xMin)*plotW; }
+  function py(y) { return PAD.top  + (1-(y-yMin)/(yMax-yMin))*plotH; }
+
+  // grid
+  ctx.strokeStyle='#1a1a1a'; ctx.lineWidth=0.5;
+  for (let i=0;i<=4;i++) {
+    const x = PAD.left + i*plotW/4;
+    ctx.beginPath(); ctx.moveTo(x,PAD.top); ctx.lineTo(x,PAD.top+plotH); ctx.stroke();
+    const y = PAD.top + i*plotH/4;
+    ctx.beginPath(); ctx.moveTo(PAD.left,y); ctx.lineTo(PAD.left+plotW,y); ctx.stroke();
+  }
+
+  // axes labels
+  ctx.fillStyle='#888'; ctx.font='9px monospace'; ctx.textAlign='center';
+  ctx.fillText('x', W/2, H-2);
+  ctx.save(); ctx.translate(10, H/2); ctx.rotate(-Math.PI/2);
+  ctx.fillText('y', 0, 0); ctx.restore();
+
+  // true function
+  const xPlot = linspace(0,1,300);
+  ctx.strokeStyle=COLORS.green; ctx.lineWidth=2;
+  ctx.beginPath();
+  xPlot.forEach((x,i) => {
+    const y=trueFunc(x);
+    i===0 ? ctx.moveTo(px(x),py(y)) : ctx.lineTo(px(x),py(y));
+  });
+  ctx.stroke();
+
+  // model fit
+  const yFit = predict(coeffs, xPlot, degree);
+  ctx.strokeStyle=COLORS.violet; ctx.lineWidth=2;
+  ctx.beginPath();
+  xPlot.forEach((x,i) => {
+    i===0 ? ctx.moveTo(px(x),py(yFit[i])) : ctx.lineTo(px(x),py(yFit[i]));
+  });
+  ctx.stroke();
+
+  // train dots
+  ctx.fillStyle=COLORS.blue;
+  Xtr.forEach((x,i) => {
+    ctx.beginPath(); ctx.arc(px(x),py(ytr[i]),3,0,2*Math.PI); ctx.fill();
+  });
+
+  // test triangles
+  ctx.fillStyle=COLORS.red;
+  Xte.forEach((x,i) => {
+    const cx=px(x), cy=py(yte[i]), s=4;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy-s); ctx.lineTo(cx+s, cy+s); ctx.lineTo(cx-s, cy+s);
+    ctx.closePath(); ctx.fill();
+  });
+}
+
+// ── Main update ──────────────────────────────────────────────────
+function update() {
+  const degree   = parseInt(document.getElementById('sDegree').value);
+  const noiseRaw = parseInt(document.getElementById('sNoise').value);
+  const noise    = noiseRaw/100;
+  const nSamples = parseInt(document.getElementById('sSamples').value);
+  const regType  = document.getElementById('sRegType').value;
+  const alphaRaw = parseInt(document.getElementById('sAlpha').value)/10;
+  const l1Ratio  = parseInt(document.getElementById('sL1').value)/100;
+  const cvFolds  = parseInt(document.getElementById('sFolds').value);
+
+  const alphaVal = regType==='ols' ? 0 : alphaRaw;
+
+  // update labels
+  document.getElementById('vDegree').textContent  = degree;
+  document.getElementById('vNoise').textContent    = noise.toFixed(2);
+  document.getElementById('vSamples').textContent  = nSamples;
+  document.getElementById('vAlpha').textContent    = alphaRaw.toFixed(1);
+  document.getElementById('vL1').textContent       = l1Ratio.toFixed(2);
+  document.getElementById('vFolds').textContent    = cvFolds;
+
+  // data
+  const {X,y} = generateData(nSamples, noise);
+  const {Xtr,ytr,Xte,yte} = trainTestSplit(X, y);
+
+  if (Xtr.length < degree+1) {
+    document.getElementById('diagBanner').textContent = 'Not enough training samples for this degree';
+    document.getElementById('diagBanner').style.color = COLORS.gold;
+    return;
+  }
+
+  const coeffs   = fitModel(Xtr, ytr, degree, regType, alphaVal);
+  const yhatTr   = predict(coeffs, Xtr, degree);
+  const yhatTe   = predict(coeffs, Xte, degree);
+  const trainErr = mse(ytr, yhatTr);
+  const testErr  = mse(yte, yhatTe);
+  const {foldMSEs, mean:cvMean, std:cvStd} = kFoldCV(X, y, degree, regType, alphaVal, cvFolds);
+
+  const biasProxy = trainErr;
+  const varProxy  = Math.max(0, testErr-trainErr);
+  const noiseFloor = noise*noise;
+  const gap = testErr-trainErr;
+
+  // Diagnosis
+  let status, diagColor;
+  if (degree<=2 && trainErr>0.3)    { status='Underfitting (high bias)';    diagColor=COLORS.red; }
+  else if (gap>0.15)                 { status='Overfitting (high variance)'; diagColor=COLORS.red; }
+  else                               { status='Well-balanced';               diagColor=COLORS.green; }
+
+  const regLabel = {ols:'OLS — no regularization', ridge:`Ridge L2 (α=${alphaRaw.toFixed(1)})`,
+    lasso:`Lasso L1 (α=${(alphaRaw*0.01).toFixed(3)})`,
+    elastic:`Elastic Net (α=${(alphaRaw*0.01).toFixed(3)}, L1=${l1Ratio.toFixed(2)})`}[regType];
+
+  const diag = document.getElementById('diagBanner');
+  diag.style.color = diagColor;
+  diag.textContent = `Diagnosis: ${status}   |   Degree: ${degree}   |   ${regLabel}   |   Train: ${trainErr.toFixed(3)}   Test: ${testErr.toFixed(3)}   CV Mean: ${cvMean.toFixed(3)} ± ${cvStd.toFixed(3)}`;
+
+  document.getElementById('cvFoldTitle').textContent = `${cvFolds}-Fold CV scores`;
+
+  // ── Panel 1: model fit ───────────────────────────────────────
+  drawFitCanvas(Xtr, ytr, Xte, yte, coeffs, degree);
+
+  // ── Panel 2: error bars ──────────────────────────────────────
+  const maxBarY = Math.max(testErr, cvMean)*1.6+0.05;
+  mkChart('cError','bar',{
+    labels:['Train MSE\n(Bias proxy)',`Test MSE\n(Total error)`,`CV Mean\n(${cvFolds}-fold)`],
+    datasets:[{
+      data:[trainErr, testErr, cvMean],
+      backgroundColor:[COLORS.blue+'cc', COLORS.red+'cc', COLORS.purple+'cc'],
+      borderRadius:3
+    }]
+  },{
+    ...CHART_OPTS,
+    plugins:{
+      legend:{display:false},
+      annotation:{}
+    },
+    scales:{
+      x:{...CHART_OPTS.scales.x, ticks:{...CHART_OPTS.scales.x.ticks, maxRotation:0}},
+      y:{...CHART_OPTS.scales.y, min:0, max:maxBarY,
+         afterDraw(chart){
+           const ctx2=chart.ctx, yScale=chart.scales.y, xScale=chart.scales.x;
+           const yPx = yScale.getPixelForValue(noiseFloor);
+           ctx2.save();
+           ctx2.strokeStyle=COLORS.green; ctx2.lineWidth=1.5;
+           ctx2.setLineDash([5,4]);
+           ctx2.beginPath();
+           ctx2.moveTo(xScale.left, yPx); ctx2.lineTo(xScale.right, yPx);
+           ctx2.stroke();
+           ctx2.fillStyle=COLORS.green; ctx2.font='9px monospace'; ctx2.setLineDash([]);
+           ctx2.fillText(`Noise floor (${noiseFloor.toFixed(2)})`, xScale.left+4, yPx-3);
+           ctx2.restore();
+         }
+        }
+    }
+  });
+
+  // ── Panel 3: pie ─────────────────────────────────────────────
+  mkChart('cPie','pie',{
+    labels:['Bias² (train err)','Variance (test−train)','Noise (irreducible)'],
+    datasets:[{
+      data:[Math.max(biasProxy,0.001), Math.max(varProxy,0.001), Math.max(noiseFloor,0.001)],
+      backgroundColor:[COLORS.blue+'cc', COLORS.red+'cc', COLORS.gray+'cc'],
+      borderWidth:0
+    }]
+  },{
+    responsive:true, maintainAspectRatio:false, animation:{duration:250},
+    plugins:{
+      legend:{
+        display:true, position:'bottom',
+        labels:{color:'#aaa', font:{size:9}, boxWidth:10}
+      }
+    }
+  });
+
+  // ── Panel 4: CV fold bars ────────────────────────────────────
+  const foldLabels = Array.from({length:cvFolds},(_,i)=>`F${i+1}`);
+  mkChart('cFolds','bar',{
+    labels: foldLabels,
+    datasets:[{
+      data: foldMSEs,
+      backgroundColor: foldMSEs.map(v => v<cvMean ? COLORS.green+'cc' : COLORS.red+'cc'),
+      borderRadius:3
+    }]
+  },{
+    ...CHART_OPTS,
+    plugins:{
+      legend:{display:false},
+      annotation:{}
+    },
+    scales:{
+      x:{...CHART_OPTS.scales.x},
+      y:{...CHART_OPTS.scales.y, min:0,
+         afterDraw(chart){
+           const ctx2=chart.ctx, yS=chart.scales.y, xS=chart.scales.x;
+           const drawH=(val,col,dash)=>{
+             const yp=yS.getPixelForValue(val);
+             ctx2.save(); ctx2.strokeStyle=col; ctx2.lineWidth=1.5;
+             ctx2.setLineDash(dash||[]);
+             ctx2.beginPath(); ctx2.moveTo(xS.left,yp); ctx2.lineTo(xS.right,yp); ctx2.stroke();
+             ctx2.restore();
+           };
+           drawH(cvMean, COLORS.purple,[6,3]);
+           drawH(cvMean+cvStd, COLORS.gold,[3,3]);
+           drawH(Math.max(0,cvMean-cvStd), COLORS.gold,[3,3]);
+         }
+        }
+    }
+  });
+
+  // ── Panel 5: full summary ────────────────────────────────────
+  mkChart('cSummary','bar',{
+    labels:['Train MSE','Test MSE','CV Mean','CV Std'],
+    datasets:[{
+      data:[trainErr, testErr, cvMean, cvStd],
+      backgroundColor:[COLORS.blue+'cc',COLORS.red+'cc',COLORS.purple+'cc',COLORS.gold+'cc'],
+      borderRadius:3
+    }]
+  },{
+    ...CHART_OPTS,
+    scales:{
+      x:{...CHART_OPTS.scales.x, ticks:{...CHART_OPTS.scales.x.ticks, maxRotation:0}},
+      y:{...CHART_OPTS.scales.y, min:0}
+    }
+  });
+
+  // ── Panel 6: error vs complexity ────────────────────────────
+  const degRange = Array.from({length:12},(_,i)=>i+1);
+  const trErrs=[], teErrs=[], cvErrs=[];
+  for (const d of degRange) {
+    if (Xtr.length < d+1) { trErrs.push(null); teErrs.push(null); cvErrs.push(null); continue; }
+    const c2   = fitModel(Xtr, ytr, d, regType, alphaVal);
+    const yTr2 = predict(c2, Xtr, d);
+    const yTe2 = predict(c2, Xte, d);
+    trErrs.push(parseFloat(mse(ytr,yTr2).toFixed(4)));
+    teErrs.push(parseFloat(mse(yte,yTe2).toFixed(4)));
+    const cv2  = kFoldCV(X, y, d, regType, alphaVal, cvFolds);
+    cvErrs.push(parseFloat(cv2.mean.toFixed(4)));
+  }
+  const maxY6 = Math.min(2.0, Math.max(...teErrs.filter(v=>v!==null))*1.3);
+  mkChart('cComplexity','line',{
+    labels: degRange,
+    datasets:[
+      {label:'Train MSE', data:trErrs, borderColor:COLORS.blue, borderWidth:2, pointRadius:3, tension:0.3, fill:false},
+      {label:'Test MSE',  data:teErrs, borderColor:COLORS.red,  borderWidth:2, pointRadius:3, tension:0.3, fill:false},
+      {label:'CV Mean',   data:cvErrs, borderColor:COLORS.purple,borderWidth:2, pointRadius:3, tension:0.3, fill:false, borderDash:[5,3]},
+    ]
+  },{
+    ...CHART_OPTS,
+    plugins:{
+      legend:{
+        display:true, position:'top',
+        labels:{color:'#aaa', font:{size:9}, boxWidth:10, padding:6}
+      },
+      annotation:{}
+    },
+    scales:{
+      x:{...CHART_OPTS.scales.x,
+         afterDraw(chart){
+           const ctx2=chart.ctx, xS=chart.scales.x, yS=chart.scales.y;
+           const xp=xS.getPixelForValue(degree-1);
+           ctx2.save(); ctx2.strokeStyle=COLORS.gold; ctx2.lineWidth=1.2;
+           ctx2.setLineDash([4,3]);
+           ctx2.beginPath(); ctx2.moveTo(xp,yS.top); ctx2.lineTo(xp,yS.bottom); ctx2.stroke();
+           ctx2.restore();
+         }
+        },
+      y:{...CHART_OPTS.scales.y, min:0, max:maxY6}
+    }
+  });
+}
+
+// ── Event listeners ──────────────────────────────────────────────
+['sDegree','sNoise','sSamples','sAlpha','sL1','sFolds','sRegType'].forEach(id => {
+  document.getElementById(id).addEventListener('input', update);
+});
+
+// ── Init ─────────────────────────────────────────────────────────
+window.addEventListener('load', () => { setTimeout(update, 100); });
+window.addEventListener('resize', () => { setTimeout(update, 150); });
+</script>
+</body>
+</html>
